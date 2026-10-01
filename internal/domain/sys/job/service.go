@@ -1,0 +1,266 @@
+// internal/modules/sys/job/service.go 任务管理业务服务（对齐 voxel-boot JobService）。
+//
+// Author: Charlie
+
+package job
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"gorm.io/gorm"
+
+	"voxel-gin-admin/internal/infrastructure/platform/db/dialect"
+	"voxel-gin-admin/internal/infrastructure/platform/gojob"
+	"voxel-gin-admin/internal/infrastructure/platform/idgen"
+	"voxel-gin-admin/internal/infrastructure/platform/module"
+)
+
+// Service 任务管理业务服务。
+//
+// Author: Charlie
+type Service struct {
+	db   *gorm.DB
+	jobs *gojob.Manager
+}
+
+// NewService 构造服务。
+func NewService(db *gorm.DB, jobs *gojob.Manager) *Service {
+	return &Service{db: db, jobs: jobs}
+}
+
+// New 构建 sys.job 模块。
+
+// ServiceFromDeps 从模块依赖构造领域 Service（供 Case/Trigger 组装）。
+func ServiceFromDeps(d *module.Deps) *Service {
+
+	return NewService(d.DB, d.Jobs)
+}
+
+func New(d *module.Deps) module.Module {
+	_ = d
+	return module.Module{
+		Name:   "sys.job",
+		Models: []any{&gojob.SysJob{}},
+	}
+}
+
+// Create 创建任务。
+func (s *Service) Create(ctx context.Context, req AddParam) error {
+	if err := gojob.ValidateTrigger(req.TriggerType, req.TriggerConfig); err != nil {
+		return err
+	}
+	if s.jobs != nil && !s.jobs.HasHandler(strings.TrimSpace(req.Handler)) {
+		return fmt.Errorf("未找到任务处理器: %s", req.Handler)
+	}
+	enabled := 1
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	now := time.Now().UTC()
+	next, err := gojob.ComputeNextRunTime(req.TriggerType, req.TriggerConfig, now)
+	if err != nil {
+		return err
+	}
+	row := gojob.SysJob{
+		ID:            idgen.Next(),
+		Name:          strings.TrimSpace(req.Name),
+		Handler:       strings.TrimSpace(req.Handler),
+		TriggerType:   strings.ToUpper(strings.TrimSpace(req.TriggerType)),
+		TriggerConfig: strings.TrimSpace(req.TriggerConfig),
+		Params:        gojob.ParamJSON(req.Params),
+		NextRunTime:   next,
+		Enabled:       enabled,
+		Description:   req.Description,
+		Sort:          req.Sort,
+	}
+	return s.db.WithContext(ctx).Create(&row).Error
+}
+
+// Update 更新任务。
+func (s *Service) Update(ctx context.Context, req EditParam) error {
+	var row gojob.SysJob
+	if err := s.db.WithContext(ctx).First(&row, "id = ?", req.ID).Error; err != nil {
+		return fmt.Errorf("job not found")
+	}
+	if err := gojob.ValidateTrigger(req.TriggerType, req.TriggerConfig); err != nil {
+		return err
+	}
+	if s.jobs != nil && !s.jobs.HasHandler(strings.TrimSpace(req.Handler)) {
+		return fmt.Errorf("未找到任务处理器: %s", req.Handler)
+	}
+	enabled := row.Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	typeChanged := !strings.EqualFold(row.TriggerType, req.TriggerType) ||
+		row.TriggerConfig != strings.TrimSpace(req.TriggerConfig)
+	updates := map[string]any{
+		"name":           strings.TrimSpace(req.Name),
+		"handler":        strings.TrimSpace(req.Handler),
+		"trigger_type":   strings.ToUpper(strings.TrimSpace(req.TriggerType)),
+		"trigger_config": strings.TrimSpace(req.TriggerConfig),
+		"params":         gojob.ParamJSON(req.Params),
+		"enabled":        enabled,
+		"description":    req.Description,
+		"sort":           req.Sort,
+	}
+	if typeChanged {
+		next, err := gojob.ComputeNextRunTime(req.TriggerType, req.TriggerConfig, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		updates["next_run_time"] = next
+	}
+	return s.db.WithContext(ctx).Model(&gojob.SysJob{}).Where("id = ?", row.ID).Updates(updates).Error
+}
+
+// Delete 批量删除。
+func (s *Service) Delete(ctx context.Context, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&gojob.SysJob{}).Error
+}
+
+// Detail 详情。
+func (s *Service) Detail(ctx context.Context, id string) (*gojob.SysJob, error) {
+	var row gojob.SysJob
+	if err := s.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
+		return nil, fmt.Errorf("job not found")
+	}
+	return &row, nil
+}
+
+// Page 分页。
+func (s *Service) Page(ctx context.Context, q PageParam) ([]gojob.SysJob, int64, int, int, error) {
+	cur, size := q.Normalize()
+	tx := s.db.WithContext(ctx).Model(&gojob.SysJob{})
+	if n := strings.TrimSpace(q.Name); n != "" {
+		tx = tx.Where(dialect.ILike(tx, "name"), dialect.Contains(n))
+	}
+	if t := strings.TrimSpace(q.TriggerType); t != "" {
+		tx = tx.Where("trigger_type = ?", strings.ToUpper(t))
+	}
+	if q.Enabled != nil {
+		tx = tx.Where("enabled = ?", *q.Enabled)
+	}
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, cur, size, err
+	}
+	var rows []gojob.SysJob
+	err := tx.Order("sort ASC, created_at DESC").Offset((cur - 1) * size).Limit(size).Find(&rows).Error
+	return rows, total, cur, size, err
+}
+
+// SetEnabled 启停。
+func (s *Service) SetEnabled(ctx context.Context, req EnabledParam) error {
+	var row gojob.SysJob
+	if err := s.db.WithContext(ctx).First(&row, "id = ?", req.ID).Error; err != nil {
+		return fmt.Errorf("job not found")
+	}
+	updates := map[string]any{"enabled": req.Enabled}
+	if req.Enabled == 1 {
+		next, err := gojob.ComputeNextRunTime(row.TriggerType, row.TriggerConfig, time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		updates["next_run_time"] = next
+	}
+	return s.db.WithContext(ctx).Model(&gojob.SysJob{}).Where("id = ?", row.ID).Updates(updates).Error
+}
+
+// RunNow 立即执行。
+func (s *Service) RunNow(ctx context.Context, id, executor string) error {
+	var row gojob.SysJob
+	if err := s.db.WithContext(ctx).First(&row, "id = ?", id).Error; err != nil {
+		return fmt.Errorf("job not found")
+	}
+	if row.Enabled != 1 {
+		return fmt.Errorf("任务未启用")
+	}
+	if s.jobs == nil {
+		return fmt.Errorf("调度器未就绪")
+	}
+	if executor == "" {
+		executor = gojob.ExecutorSystem
+	}
+	s.jobs.SubmitRun(ctx, id, true, executor)
+	return nil
+}
+
+// Logs 执行日志分页。
+func (s *Service) Logs(ctx context.Context, q LogParam) ([]gojob.SysJobLog, int64, int, int, error) {
+	cur, size := q.Normalize()
+	tx := s.db.WithContext(ctx).Model(&gojob.SysJobLog{})
+	if id := strings.TrimSpace(q.JobID); id != "" {
+		tx = tx.Where("job_id = ?", id)
+	}
+	if q.Success != nil {
+		tx = tx.Where("success = ?", *q.Success)
+	}
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, cur, size, err
+	}
+	var rows []gojob.SysJobLog
+	err := tx.Order("started_at DESC").Offset((cur - 1) * size).Limit(size).Find(&rows).Error
+	return rows, total, cur, size, err
+}
+
+func sampleHandler(_ context.Context, paramJSON string) (string, error) {
+	if strings.TrimSpace(paramJSON) == "" || paramJSON == "{}" || paramJSON == "null" {
+		return "echo: (无参数)", nil
+	}
+	return "echo: " + paramJSON, nil
+}
+
+func (s *Service) logCleanupHandler(ctx context.Context, paramJSON string) (string, error) {
+	retention := 30
+	batch := 1000
+	if s.jobs != nil {
+		cfg := s.jobs.ConfigValues()
+		retention = cfg.LogRetentionDays
+		batch = cfg.LogBatchSize
+	}
+	if strings.TrimSpace(paramJSON) != "" && paramJSON != "null" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(paramJSON), &m); err == nil {
+			if v, ok := asInt(m["retentionDays"]); ok && v > 0 {
+				retention = v
+			}
+			if v, ok := asInt(m["batchSize"]); ok && v > 0 {
+				batch = v
+			}
+		}
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -retention)
+	res := s.db.WithContext(ctx).
+		Where("started_at < ?", cutoff).
+		Limit(batch).
+		Delete(&gojob.SysJobLog{})
+	if res.Error != nil {
+		return "", res.Error
+	}
+	return fmt.Sprintf("deleted=%d,retentionDays=%d,batchSize=%d", res.RowsAffected, retention, batch), nil
+}
+
+func asInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	default:
+		return 0, false
+	}
+}

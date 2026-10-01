@@ -1,0 +1,19 @@
+// internal/modules/sys/audit/param.go 入参定义。
+//
+// Author: Charlie
+
+package audit
+
+import "voxel-gin-admin/internal/types/schema"
+
+// PageParam 审计日志分页查询。
+//
+// Author: Charlie
+type PageParam struct {
+	schema.PageQuery
+	Module         string `form:"module"`
+	Action         string `form:"action"`
+	ExcludeAction  string `form:"exclude_action"`
+	AccountID      string `form:"account_id"`
+	Success         *int  `form:"success"`
+}
