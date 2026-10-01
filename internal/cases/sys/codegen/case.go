@@ -1,4 +1,4 @@
-// Package codegencase 用例编排（xfg-ddd cases；具体类型，无接口）。
+// Package codegencase 用例编排（具体类型，无接口）。
 //
 // Author: Charlie
 package codegencase

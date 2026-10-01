@@ -1,4 +1,4 @@
-// Package identityhttp HTTP 触发器（xfg-ddd trigger）。
+// Package identityhttp HTTP 触发器。
 //
 // Author: Charlie
 

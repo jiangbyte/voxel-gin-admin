@@ -1,4 +1,4 @@
-// Package jobhttp HTTP 触发器（xfg-ddd trigger）。
+// Package jobhttp HTTP 触发器。
 //
 // Author: Charlie
 

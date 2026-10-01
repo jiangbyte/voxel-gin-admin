@@ -1,4 +1,4 @@
-// Package rolehttp HTTP 触发器（xfg-ddd trigger）。
+// Package rolehttp HTTP 触发器。
 //
 // Author: Charlie
 

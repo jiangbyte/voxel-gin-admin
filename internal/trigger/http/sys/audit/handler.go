@@ -1,4 +1,4 @@
-// Package audithttp HTTP 触发器（xfg-ddd trigger）。
+// Package audithttp HTTP 触发器。
 //
 // Author: Charlie
 

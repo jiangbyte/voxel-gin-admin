@@ -1,4 +1,4 @@
-// Package dicthttp HTTP 触发器（xfg-ddd trigger）。
+// Package dicthttp HTTP 触发器。
 //
 // Author: Charlie
 

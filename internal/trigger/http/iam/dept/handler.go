@@ -1,4 +1,4 @@
-// Package depthttp HTTP 触发器（xfg-ddd trigger）。
+// Package depthttp HTTP 触发器。
 //
 // Author: Charlie
 

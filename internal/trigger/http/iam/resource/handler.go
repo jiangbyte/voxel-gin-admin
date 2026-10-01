@@ -1,4 +1,4 @@
-// Package resourcehttp HTTP 触发器（xfg-ddd trigger）。
+// Package resourcehttp HTTP 触发器。
 //
 // Author: Charlie
 

@@ -1,4 +1,4 @@
-// Package grouphttp HTTP 触发器（xfg-ddd trigger）。
+// Package grouphttp HTTP 触发器。
 //
 // Author: Charlie
 

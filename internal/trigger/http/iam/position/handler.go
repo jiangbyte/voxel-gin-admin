@@ -1,4 +1,4 @@
-// Package positionhttp HTTP 触发器（xfg-ddd trigger）。
+// Package positionhttp HTTP 触发器。
 //
 // Author: Charlie
 

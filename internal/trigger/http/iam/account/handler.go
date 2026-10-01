@@ -1,4 +1,4 @@
-// Package accounthttp HTTP 触发器（xfg-ddd trigger）。
+// Package accounthttp HTTP 触发器。
 //
 // Author: Charlie
 
